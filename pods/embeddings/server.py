@@ -1,154 +1,146 @@
+import json
+import argparse
+import logging
+import traceback
 from functools import partial
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
-
 import model as embeddings
-import argparse
 
-import traceback
-
-def toArray(emb):
-  return [v.item() for v in emb]
-
+def to_array(emb):
+    """Converts the embedding tensor to a list."""
+    return [v.item() for v in emb]
 
 class EmbeddingsServer(BaseHTTPRequestHandler):
-    embService: embeddings.EmbeddingService
+    """Handles HTTP requests for embedding-related operations."""
     
-    def __init__(self, embService, *args, **kwargs):
-      self.embService = embService
-      super().__init__(*args, **kwargs)
-    
-    def do_POST(self):
-        try:
-          if self.path == '/embeddings':
-            self.sendEmbeddings()
-            return
-          
-          if self.path == '/completion':
-            self.sendCompletion()
-            return
-          
-          if self.path == '/compare':
-            self.sendCompare()
-            return
-        except BaseException as e:
-          print('Failed to process', e)
-          pass
-        
-        self.send_response(200)
-        self.send_header("Content-type", "text/json")
-        self.end_headers()
-        obj = {
-            "result": False,
-            "error": "Unknown service"
-        }
-        self.wfile.write(bytes(json.dumps(obj), "utf-8"))
+    def __init__(self, emb_service, *args, **kwargs):
+        """Initialize the EmbeddingsServer with an EmbeddingService instance."""
+        self.emb_service = emb_service
+        super().__init__(*args, **kwargs)
 
-    def sendEmbeddings(self):           
-        data = self.rfile.read(int(self.headers['Content-Length']))
-        jsbody = json.loads(data)
-        model = jsbody["model"]
+    def do_POST(self):
+        """Handles POST requests."""
         try:
-          embeddings = self.embService.embeddings(jsbody["input"])
-          emb = toArray(embeddings[0])
-          obj = {
-                "data": [
-                  {
+            if self.path == '/embeddings':
+                self.send_embeddings()
+                return
+            elif self.path == '/completion':
+                self.send_completion()
+                return
+            elif self.path == '/compare':
+                self.send_compare()
+                return
+        except Exception as e:
+            logging.error('Failed to process request: %s', e)
+            self.send_error(500, str(e))
+
+    def send_embeddings(self):
+        """Handles '/embeddings' endpoint."""
+        content_length = int(self.headers['Content-Length'])
+        data = self.rfile.read(content_length)
+        js_body = json.loads(data)
+        model = js_body["model"]
+        try:
+            embeddings = self.emb_service.embeddings(js_body["input"])
+            emb = to_array(embeddings[0])
+            obj = {
+                "data": [{
                     "embedding": emb,
                     "size": len(emb)
-                  }
-                ],
+                }],
                 "model": model,
                 "usage": {
-                  "prompt_tokens": embeddings[1],
-                  "total_tokens": 1
-                }            
-            }
-          self.send_response(200)
-          self.send_header("Content-type", "text/json")
-          self.end_headers()     
-          self.wfile.write(bytes(json.dumps(obj), "utf-8"))
-        except BaseException as e:
-          # self.send_response(400, str(e))
-          self.send_error(400, str(e))
-          self.end_headers()
-          print('error', e)
-          traceback.print_exc()
-          pass
-        
-    def sendCompletion(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/json")
-        self.end_headers()          
-        data = self.rfile.read(int(self.headers['Content-Length']))
-        jsbody = json.loads(data)
-        completion = self.embService.completion(jsbody["input"], max_length=jsbody["max_length"], temperature=jsbody["temperature"] )
-        model = jsbody["model"]
-        obj = {
-              "data": [
-                {
-                  "completion": completion
+                    "prompt_tokens": embeddings[1],
+                    "total_tokens": 1
                 }
-              ],
-              "model": model
-          }
-        self.wfile.write(bytes(json.dumps(obj), "utf-8"))
-        
-    def sendCompare(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/json")
-        self.end_headers()          
-        data = self.rfile.read(int(self.headers['Content-Length']))
-        jsbody = json.loads(data)
-        emb1 = self.embService.embeddings(jsbody["input"])
-        emb2 = self.embService.embeddings(jsbody["compare"])
-        model = jsbody["model"]
-        e1 = toArray(emb1[0])
-        e2 = toArray(emb2[0])
+            }
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(bytes(json.dumps(obj), "utf-8"))
+        except Exception as e:
+            logging.error('Error processing embeddings: %s', e)
+            self.send_error(400, str(e))
+            traceback.print_exc()
+
+    def send_completion(self):
+        """Handles '/completion' endpoint."""
+        content_length = int(self.headers['Content-Length'])
+        data = self.rfile.read(content_length)
+        js_body = json.loads(data)
+        completion = self.emb_service.completion(js_body["input"], max_length=js_body["max_length"],
+                                                 temperature=js_body["temperature"])
+        model = js_body["model"]
         obj = {
-              "similarity": self.embService.compare(emb1[0], emb2[0]).item(),
-              "input": e1,
-              "input_len": len(e1), 
-              "compare": e2,
-              "compare_len": len(e2),
-              "model": model
-          }
+            "data": [{
+                "completion": completion
+            }],
+            "model": model
+        }
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
         self.wfile.write(bytes(json.dumps(obj), "utf-8"))
 
-if __name__ == "__main__":        
-    parser = argparse.ArgumentParser(
-      prog = 'Embedding\'s service')
-    
-    # 1024, sentence-transformers/all-roberta-large-v1
-    # 386, sentence-transformers/all-MiniLM-L6-v2
+    def send_compare(self):
+        """Handles '/compare' endpoint."""
+        content_length = int(self.headers['Content-Length'])
+        data = self.rfile.read(content_length)
+        js_body = json.loads(data)
+        emb1 = self.emb_service.embeddings(js_body["input"])
+        emb2 = self.emb_service.embeddings(js_body["compare"])
+        model = js_body["model"]
+        e1 = to_array(emb1[0])
+        e2 = to_array(emb2[0])
+        similarity = self.emb_service.compare(emb1[0], emb2[0]).item()
+        obj = {
+            "similarity": similarity,
+            "input": e1,
+            "input_len": len(e1),
+            "compare": e2,
+            "compare_len": len(e2),
+            "model": model
+        }
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(bytes(json.dumps(obj), "utf-8"))
+
+def main():
+    """Main function to start the embedding service."""
+    parser = argparse.ArgumentParser(prog='Embedding\'s service')
     parser.add_argument('--model', default="sentence-transformers/all-MiniLM-L6-v2")
     parser.add_argument('--host', default="0.0.0.0")
     parser.add_argument('--device', default='cpu')
-    parser.add_argument('--port', default=4070)      # option that takes a value
-
+    parser.add_argument('--port', type=int, default=4070)
     args = parser.parse_args()
 
-    hostName = args.host
-    serverPort = args.port
+    host_name = args.host
+    server_port = args.port
     device = args.device
     model = args.model
-    
-    print('loading model:', model, ' on device:', device)
 
-    emb = embeddings.EmbeddingService(model, device)
+    logging.basicConfig(level=logging.INFO)
 
-    webServer = HTTPServer((hostName, serverPort), partial(EmbeddingsServer, emb), bind_and_activate=False)
-    webServer.allow_reuse_address = True
-    webServer.daemon_threads = True
+    logging.info('Loading model: %s on device: %s', model, device)
+    emb_service = embeddings.EmbeddingService(model, device)
 
-    webServer.server_bind()
-    webServer.server_activate()
-    print("Embedding started http://%s:%s" % (hostName, serverPort))
+    web_server = HTTPServer((host_name, server_port), partial(EmbeddingsServer, emb_service),
+                            bind_and_activate=False)
+    web_server.allow_reuse_address = True
+    web_server.daemon_threads = True
+
+    web_server.server_bind()
+    web_server.server_activate()
+    logging.info("Embedding service started at http://%s:%s", host_name, server_port)
 
     try:
-        webServer.serve_forever()
+        web_server.serve_forever()
     except KeyboardInterrupt:
         pass
 
-    webServer.server_close()
-    print("Server stopped.")
+    web_server.server_close()
+    logging.info("Server stopped.")
+
+if __name__ == "__main__":
+    main()
