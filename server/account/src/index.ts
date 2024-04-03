@@ -837,7 +837,7 @@ export async function createWorkspace (
       const initWS = getMetadata(toolPlugin.metadata.InitWorkspace)
       const wsId = getWorkspaceId(workspaceInfo.workspace, productId)
       if (initWS !== undefined && (await getWorkspaceById(db, productId, initWS)) !== null) {
-        client = await initModel(getTransactor(), wsId, txes, [], ctxModellogger)
+        client = await initModel(ctx, getTransactor(), wsId, txes, [], ctxModellogger)
         await client.close()
         await cloneWorkspace(
           getTransactor(),
@@ -846,7 +846,7 @@ export async function createWorkspace (
         )
         client = await upgradeModel(getTransactor(), wsId, txes, migrationOperation, ctxModellogger)
       } else {
-        client = await initModel(getTransactor(), wsId, txes, migrationOperation, ctxModellogger)
+        client = await initModel(ctx, getTransactor(), wsId, txes, migrationOperation, ctxModellogger)
       }
     } catch (err: any) {
       return { workspaceInfo, err, client: {} as any }
@@ -1092,7 +1092,7 @@ export async function getWorkspaceInfo (
 
   const [ws] = (
     await db.collection<Workspace>(WORKSPACE_COLLECTION).find(withProductId(productId, query)).toArray()
-  ).filter((it) => it.disabled !== true)
+  ).filter((it) => it.disabled !== true || account?.admin === true)
   if (ws == null) {
     throw new PlatformError(new Status(Severity.ERROR, platform.status.Forbidden, {}))
   }

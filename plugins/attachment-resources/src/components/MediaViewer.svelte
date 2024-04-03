@@ -14,21 +14,16 @@
 -->
 <script lang="ts">
   // import { Doc } from '@hcengineering/core'
-  import { Button, Dialog, Label, Spinner } from '@hcengineering/ui'
+  import { Button, Dialog } from '@hcengineering/ui'
+  import type { Attachment } from '@hcengineering/attachment'
+  import AudioPlayer from './AudioPlayer.svelte'
   import { createEventDispatcher, onMount } from 'svelte'
-  import presentation from '..'
-  import { getFileUrl } from '../utils'
-  import Download from './icons/Download.svelte'
-  import ActionContext from './ActionContext.svelte'
+  import presentation, { ActionContext, PDFViewer, IconDownload, getFileUrl } from '@hcengineering/presentation'
+  import { getType } from '../utils'
 
-  export let file: string | undefined
-  export let name: string
-  export let contentType: string | undefined
-  // export let popupOptions: PopupOptions
-  // export let value: Doc
+  export let value: Attachment
   export let showIcon = true
   export let fullSize = false
-  export let isLoading = false
 
   const dispatch = createEventDispatcher()
 
@@ -43,8 +38,8 @@
     }
   })
   let download: HTMLAnchorElement
-  $: src = file === undefined ? '' : getFileUrl(file, 'full', name)
-  $: isImage = contentType !== undefined && contentType.startsWith('image/')
+  $: type = getType(value.type)
+  $: src = getFileUrl(value.file, 'full', value.name)
 </script>
 
 <ActionContext context={{ mode: 'browser' }} />
@@ -52,6 +47,7 @@
   isFullSize
   on:fullsize
   on:close={() => {
+    console.log('close')
     dispatch('close')
   }}
 >
@@ -60,45 +56,36 @@
       {#if showIcon}
         <div class="wrapped-icon">
           <div class="flex-center icon">
-            {iconLabel(name)}
+            {iconLabel(value.name)}
           </div>
         </div>
       {/if}
-      <span class="wrapped-title">{name}</span>
+      <span class="wrapped-title">{value.name}</span>
     </div>
   </svelte:fragment>
 
   <svelte:fragment slot="utils">
-    {#if !isLoading && isImage && src !== ''}
-      <a class="no-line" href={src} download={name} bind:this={download}>
-        <Button
-          icon={Download}
-          kind={'ghost'}
-          on:click={() => {
-            download.click()
-          }}
-          showTooltip={{ label: presentation.string.Download }}
-        />
-      </a>
-    {/if}
+    <a class="no-line" href={src} download={value.name} bind:this={download}>
+      <Button
+        icon={IconDownload}
+        kind={'ghost'}
+        on:click={() => {
+          download.click()
+        }}
+        showTooltip={{ label: presentation.string.Download }}
+      />
+    </a>
   </svelte:fragment>
 
-  {#if !isLoading}
-    {#if src === ''}
-      <div class="centered">
-        <Label label={presentation.string.FailedToPreview} />
-      </div>
-    {:else if isImage}
-      <div class="pdfviewer-content img">
-        <img class="img-fit" {src} alt="" />
-      </div>
-    {:else}
-      <iframe class="pdfviewer-content" src={src + '#view=FitH&navpanes=0'} title="" />
-    {/if}
+  {#if type === 'video'}
+    <video controls preload={'auto'}>
+      <source {src} />
+      <track kind="captions" label={value.name} />
+    </video>
+  {:else if type === 'audio'}
+    <AudioPlayer {value} fullSize={true} />
   {:else}
-    <div class="centered">
-      <Spinner size="medium" />
-    </div>
+    <iframe class="pdfviewer-content" src={src + '#view=FitH&navpanes=0'} title="" />
   {/if}
 </Dialog>
 
@@ -116,34 +103,10 @@
     border-radius: 0.5rem;
     cursor: pointer;
   }
-  .pdfviewer-content {
-    flex-grow: 1;
-    overflow: auto;
-    border-style: none;
-    border-radius: 0.5rem;
-    background-color: var(--theme-bg-color);
 
-    &.img {
-      display: flex;
-      align-items: center;
-      min-width: 0;
-      min-height: 0;
-    }
-  }
-  .img-fit {
-    margin: 0 auto;
-    width: fit-content;
-    height: fit-content;
+  video {
     max-width: 100%;
     max-height: 100%;
-    object-fit: contain;
-  }
-  .centered {
-    flex-grow: 1;
-    width: 100;
-    height: 100;
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    border-radius: 0.75rem;
   }
 </style>
